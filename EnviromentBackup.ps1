@@ -76,6 +76,9 @@ Set-Content -Path "G:\マイドライブ\環境バックアップ\ユーザー�
 $allStartMenu = tree "C:\ProgramData\Microsoft\Windows\Start Menu\Programs" /F
 Set-Content -Path "G:\マイドライブ\環境バックアップ\Allスタートメニュー.txt" -Value $allStartMenu
 
+# タスクスケジューラーバックアップ
+schtasks /query /xml >  G:\マイドライブ\環境バックアップ\task.xml
+
 Set-PSDebug -Trace 0
 
 # appsettings.jsonのコピー
