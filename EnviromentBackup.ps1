@@ -25,12 +25,17 @@ function WaitForMountG {
 }
 
 #appsettings.jsonのバックアップ
-function AppesttingsBackup {
+function FileBackup {
+    param (
+        [Parameter(Mandatory=$true)] # ファイル名を必須パラメータとして定義
+        [string]$TargetFileName      # バックアップ対象のファイル名を指定
+    )
+
     $rootPath = "C:\dev"
     $excludedFolders = @("packages", ".git", ".vs", "bin", "obj")
     
     # Get-ChildItemでフォルダを再帰的に検索し、指定された条件でフィルタリング
-    Get-ChildItem -Path $rootPath -Recurse -File -Filter "appsettings.json" |
+    Get-ChildItem -Path $rootPath -Recurse -File -Filter $TargetFileName |
     Where-Object {
         # ファイルのディレクトリパスに含まれるフォルダが除外対象でないことを確認
         $filePath = $_.FullName
@@ -44,8 +49,8 @@ function AppesttingsBackup {
         # 結果を表示
         $copyOrigin = $_.FullName
         $spPath = $copyOrigin.Split("\")
-        $parentFolder = $spPath[$spPath.Length-2]
-        $cpFileName = $parentFolder + "_appsettings.json"
+        $parentFolder = $spPath[$spPath.Length-3] + "_" + $spPath[$spPath.Length-2]
+        $cpFileName = $parentFolder + "_" + $TargetFileName
         $destFullPath = "G:\マイドライブ\環境バックアップ\" + $cpFileName
         $cpFileName
         Copy-Item -Path $copyOrigin -Destination $destFullPath
@@ -82,6 +87,7 @@ schtasks /query /xml >  G:\マイドライブ\環境バックアップ\task.xml
 Set-PSDebug -Trace 0
 
 # appsettings.jsonのコピー
-AppesttingsBackup
+FileBackup -TargetFileName "launchSettings.json"
+FileBackup -TargetFileName "test.runsettings"
 
 pause
