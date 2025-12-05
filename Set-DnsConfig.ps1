@@ -44,7 +44,7 @@ DNS over HTTPS (DoH) を有効にします（対応するWindowsバージョン�
 
 # DoHサーバーのURIテンプレート
 # 例: Cloudflare ('https://cloudflare-dns.com/dns-query'), Google ('https://dns.google/dns-query')
-[string]$DOH_TEMPLATE = 'https://stella2406.r853.noobow.me/dns-query'
+[string]$DOH_TEMPLATE = 'https://r853.noobow.me/dns-query/stella2406'
 
 # --- 設定値ここまで ---
 
