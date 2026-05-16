@@ -21,7 +21,7 @@ DNS over HTTPS (DoH) を有効にします（対応するWindowsバージョン�
 
 .EXAMPLE
 # 事前にスクリプト内の $TARGET_INTERFACE_INDEX を設定しておく
-.\Set-DnsConfig-SingleAdapter.ps1
+.\Set-DnsConfig.ps1
 プロンプトが表示され、1または2を入力して指定したアダプターのDNS設定を変更します。
 #>
 
@@ -32,15 +32,16 @@ DNS over HTTPS (DoH) を有効にします（対応するWindowsバージョン�
 # 設定対象のネットワークアダプターのインターフェースインデックス
 # PowerShellで `Get-NetAdapter | Format-Table Name, InterfaceDescription, InterfaceIndex` を実行して確認し、
 # 設定したいアダプターの InterfaceIndex の番号を指定してください。
-[int]$TARGET_INTERFACE_INDEX = 9 # <--- ここに対象アダプターのIndex番号を記入してください (例: 6)
+# ※ 0 のままだとスクリプト起動時にエラーになります
+[int]$TARGET_INTERFACE_INDEX = 8 # <--- ここに対象アダプターのIndex番号を記入してください (例: 6)
 
-# DoHで使用するDNSサーバーのIPv4アドレス (複数指定可能)
+# DoHで使用するDNSサーバーのIPv4アドレス (複数指定可能、カンマ区切り配列で指定)
 # 例: Cloudflare ('1.1.1.1', '1.0.0.1'), Google ('8.8.8.8', '8.8.4.4')
-[string]$DOH_IPV4_SERVERS = '138.3.221.196'
+[string[]]$DOH_IPV4_SERVERS = @('138.3.221.196')
 
-# DoHで使用するDNSサーバーのIPv6アドレス (複数指定可能)
+# DoHで使用するDNSサーバーのIPv6アドレス (複数指定可能、カンマ区切り配列で指定)
 # 例: Cloudflare ('2606:4700:4700::1111', '2606:4700:4700::1001'), Google ('2001:4860:4860::8888', '2001:4860:4860::8844')
-[string]$DOH_IPV6_SERVERS = '2603:c021:8012:3a7e:451c:b414:6330:e1a5'
+[string[]]$DOH_IPV6_SERVERS = @('2603:c021:8012:3a7e:451c:b414:6330:e1a5')
 
 # DoHサーバーのURIテンプレート
 # 例: Cloudflare ('https://cloudflare-dns.com/dns-query'), Google ('https://dns.google/dns-query')
@@ -48,19 +49,15 @@ DNS over HTTPS (DoH) を有効にします（対応するWindowsバージョン�
 
 # --- 設定値ここまで ---
 
-# $TARGET_INTERFACE_INDEX が初期値(0)のままかチェック
+# $TARGET_INTERFACE_INDEX が未設定(0)のままかチェック (⑦ 初期値を0に戻して判定を機能させる)
 if ($TARGET_INTERFACE_INDEX -eq 0) {
     Write-Error "スクリプト内の `$TARGET_INTERFACE_INDEX` が設定されていません。設定対象のアダプターの InterfaceIndex を指定してください。"
     Write-Host "ヒント: PowerShellで 'Get-NetAdapter | Format-Table Name, InterfaceDescription, InterfaceIndex' を実行して確認できます。"
     exit 1
 }
 
-
-# DoH設定コマンドレットが利用可能かチェック
-$isDohAvailable = $false
-if (Get-Command Set-DnsClientDohServerAddress -ErrorAction SilentlyContinue) {
-    $isDohAvailable = $true
-}
+# DoH設定コマンドレットが利用可能かチェック (⑥ 冗長なif文を1行に)
+$isDohAvailable = [bool](Get-Command Set-DnsClientDohServerAddress -ErrorAction SilentlyContinue)
 
 # 指定されたアダプターを取得
 Write-Host "-------------------------------------------"
@@ -73,21 +70,20 @@ try {
 
     # アダプターが見つかったが、StatusがUpでない場合に警告を出す
     if ($adapter.Status -ne 'Up') {
-         Write-Warning "指定されたアダプター (Name: $($adapter.Name)) は存在しますが、現在有効 (Status 'Up') ではありません。設定は試行されますが、意図通りに動作しない可能性があります。"
+        Write-Warning "指定されたアダプター (Name: $($adapter.Name)) は存在しますが、現在有効 (Status 'Up') ではありません。設定は試行されますが、意図通りに動作しない可能性があります。"
     }
 
     Write-Host "設定対象アダプターが見つかりました:"
     $adapter | Format-Table -AutoSize -Property Name, InterfaceDescription, Status, InterfaceIndex
-} catch [Microsoft.PowerShell.Commands.GetNetAdapter.NotFoundException] {
-    # 指定されたIndexのアダプターが見つからなかった場合のエラー処理
-    Write-Error "指定されたインターフェースインデックス ($TARGET_INTERFACE_INDEX) のネットワークアダプターが見つかりませんでした。"
-    Write-Host "利用可能なアダプターの一覧:"
-    # エラー時にユーザーがIndexを確認しやすいように一覧を表示
-    Get-NetAdapter | Format-Table Name, InterfaceDescription, Status, InterfaceIndex
-    exit 1
 } catch {
-    # その他のGet-NetAdapterに関するエラー
-    Write-Error "ネットワークアダプターの取得中に予期せぬエラーが発生しました: $($_.Exception.Message)"
+    # アダプターが見つからない場合とその他のエラーをCategoryInfoで判別
+    if ($_.CategoryInfo.Category -eq 'ObjectNotFound') {
+        Write-Error "指定されたインターフェースインデックス ($TARGET_INTERFACE_INDEX) のネットワークアダプターが見つかりませんでした。"
+        Write-Host "利用可能なアダプターの一覧:"
+        Get-NetAdapter | Format-Table Name, InterfaceDescription, Status, InterfaceIndex
+    } else {
+        Write-Error "ネットワークアダプターの取得中に予期せぬエラーが発生しました: $($_.Exception.Message)"
+    }
     exit 1
 }
 
@@ -120,31 +116,50 @@ switch ($choice) {
             # DNSサーバー設定をリセット
             Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ResetServerAddresses -Confirm:$false -ErrorAction Stop
             Write-Host "- DNSサーバーアドレスをリセットしました (自動取得)。"
+
+            # ① DoH設定が利用可能な場合、既存のDoH設定もクリアする
+            if ($isDohAvailable) {
+                Write-Host "- 既存のDoH設定をクリア中..."
+                # 登録済みのDoHサーバー一覧を取得して全削除
+                $existingDoh = Get-DnsClientDohServerAddress -ErrorAction SilentlyContinue
+                if ($existingDoh) {
+                    foreach ($doh in $existingDoh) {
+                        try {
+                            Remove-DnsClientDohServerAddress -ServerAddress $doh.ServerAddress -Confirm:$false -ErrorAction Stop
+                        } catch {
+                            Write-Warning "DoH設定の削除中にエラーが発生しました (ServerAddress: $($doh.ServerAddress)): $($_.Exception.Message)"
+                        }
+                    }
+                    Write-Host "- DoH設定をクリアしました。"
+                } else {
+                    Write-Host "- クリアするDoH設定はありませんでした。"
+                }
+            }
+
             Write-Host ""
             Write-Host "アダプター '$ifDesc' のDNS設定の自動取得への変更が完了しました。"
         } catch {
-            Write-Warning "アダプター '$ifDesc' の設定変更中にエラーが発生しました: $($_.Exception.Message)"
+            # ⑤ エラー時もexit 1して「完了しました」を表示させない
+            Write-Error "アダプター '$ifDesc' の設定変更中にエラーが発生しました: $($_.Exception.Message)"
+            exit 1
         }
     }
     '2' {
         Write-Host "[選択: 2] アダプター '$ifDesc' にDNS over HTTPS (DoH) を設定します..."
 
-        # 設定するDNSサーバーアドレスを結合
+        # ② string[]型になったので、空配列チェックに変更
         $dnsServers = @()
-        if ($DOH_IPV4_SERVERS) { $dnsServers += $DOH_IPV4_SERVERS }
-        if ($DOH_IPV6_SERVERS) { $dnsServers += $DOH_IPV6_SERVERS }
+        if ($DOH_IPV4_SERVERS.Count -gt 0) { $dnsServers += $DOH_IPV4_SERVERS }
+        if ($DOH_IPV6_SERVERS.Count -gt 0) { $dnsServers += $DOH_IPV6_SERVERS }
 
         if ($dnsServers.Count -eq 0) {
-             Write-Warning "設定するDoHサーバーのIPv4またはIPv6アドレスがスクリプト内で定義されていません。処理をスキップします。"
-             exit 1
+            Write-Error "設定するDoHサーバーのIPv4またはIPv6アドレスがスクリプト内で定義されていません。処理をスキップします。"
+            exit 1
         }
-        if (-not $DOH_TEMPLATE -and $isDohAvailable) {
-             Write-Warning "DoHテンプレートがスクリプト内で定義されていません。DoH設定はスキップされます。"
-             $configureDoh = $false
-        } elseif ($isDohAvailable) {
-             $configureDoh = $true
-        } else {
-             $configureDoh = $false # DoHコマンドレットが利用不可
+
+        $configureDoh = $isDohAvailable -and ($DOH_TEMPLATE -ne '')
+        if ($isDohAvailable -and -not $DOH_TEMPLATE) {
+            Write-Warning "DoHテンプレートがスクリプト内で定義されていません。DoH設定はスキップされます。"
         }
 
         Write-Host "使用するDNSサーバー: $($dnsServers -join ', ')"
@@ -163,19 +178,24 @@ switch ($choice) {
 
             # 2. DoHの設定 (利用可能かつテンプレートが指定されている場合)
             if ($configureDoh) {
-                 Write-Host "DoH設定を有効化中..."
-                 try {
-                    Set-DnsClientDohServerAddress -ServerAddress $dnsServers -DohTemplate $DOH_TEMPLATE -AllowFallbackToUdp $false -Confirm:$false -ErrorAction Stop
-                    Write-Host "- DoH設定を有効にしました。"
-                 } catch {
-                    Write-Warning "DoH設定中にエラーが発生しました: $($_.Exception.Message)"
-                 }
+                Write-Host "DoH設定を有効化中..."
+                # ③ Set-DnsClientDohServerAddress は1アドレスずつ呼び出す
+                foreach ($server in $dnsServers) {
+                    try {
+                        Set-DnsClientDohServerAddress -ServerAddress $server -DohTemplate $DOH_TEMPLATE -AllowFallbackToUdp $false -Confirm:$false -ErrorAction Stop
+                        Write-Host "- DoH設定を有効にしました: $server"
+                    } catch {
+                        Write-Warning "DoH設定中にエラーが発生しました (ServerAddress: $server): $($_.Exception.Message)"
+                    }
+                }
             }
             Write-Host ""
             Write-Host "アダプター '$ifDesc' の指定されたDNSサーバーアドレスおよびDoHの設定変更が完了しました。"
 
         } catch {
-             Write-Warning "DNSサーバーアドレス設定中にエラーが発生しました: $($_.Exception.Message)"
+            # ⑤ エラー時もexit 1して「完了しました」を表示させない
+            Write-Error "DNSサーバーアドレス設定中にエラーが発生しました: $($_.Exception.Message)"
+            exit 1
         }
     }
 }
